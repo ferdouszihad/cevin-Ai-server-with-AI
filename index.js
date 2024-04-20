@@ -6,6 +6,7 @@ const app = express();
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+//npm i @google/generative-ai;
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { MongoClient, ServerApiVersion, ObjectId, Binary } = require("mongodb");
 
@@ -69,6 +70,7 @@ const client = new MongoClient(process.env.URI, {
  ***********************************
 */
 
+//https://clipdrop.co/apis/docs/text-to-image
 async function getImageBuffer(prompt) {
   const formData = new FormData();
   formData.append("prompt", prompt);
@@ -89,6 +91,8 @@ async function getImageBuffer(prompt) {
   return await response.arrayBuffer();
 }
 
+//https://api.imgbb.com/
+// extended:: convert buffer to file using BLOB then send through API
 async function postImageBB(buffer, prompt) {
   try {
     // console.log(buffer);
@@ -114,6 +118,10 @@ async function postImageBB(buffer, prompt) {
     console.log(err);
   }
 }
+
+//https://ai.google.dev/gemini-api/docs/get-started/node
+
+// Thats The simple version.  It can generate irreleveant data . model with history could narrow down the reply . watch contextualTextGeneraton.js file
 
 const getSimpleReply = async (context, comment) => {
   const model = genAI.getGenerativeModel({ model: "gemini-pro" });
