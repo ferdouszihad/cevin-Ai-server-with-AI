@@ -68,30 +68,6 @@ const client = new MongoClient(process.env.URI, {
  utilites functions 
  ***********************************
 */
-async function fileToGenerativePart(buffer, mimeType) {
-  return {
-    inlineData: {
-      data: Buffer.from(buffer).toString("base64"),
-      mimeType,
-    },
-  };
-}
-
-async function getImageDetail(buffer) {
-  try {
-    const image = await fileToGenerativePart(buffer, "image/jpeg");
-
-    const model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
-    const prompt = "tell me in a detail about this picture?";
-    const result = await model.generateContent([prompt, image]);
-    const googleResponse = result.response;
-    const response = googleResponse.text();
-    // console.log(response);
-    return { response };
-  } catch (err) {
-    console.log(err);
-  }
-}
 
 async function getImageBuffer(prompt) {
   const formData = new FormData();
@@ -139,44 +115,10 @@ async function postImageBB(buffer, prompt) {
   }
 }
 
-const getAiReply = async (context, comment) => {
+const getSimpleReply = async (context, comment) => {
   const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-  const chat = model.startChat({
-    history: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: "giving  you  a title about a painting. imagine a painting from this title then think about a possible detail. people will give you feedbacks. you have to make a reply based on the detail  by acting that , you are cevin.AI . you draw that painting. and you will make feedback replies. user can say anything based on the comment . it could be  positive or negative.try to make it funny ",
-          },
-        ],
-      },
-      {
-        role: "model",
-        parts: [{ text: "Great. What is the painting detail" }],
-      },
-      {
-        role: "user",
-        parts: [
-          {
-            text: context,
-          },
-        ],
-      },
-      {
-        role: "model",
-        parts: [
-          {
-            text: "Great. I will iamgine a painting and  reply based on this imaginated painting detail.",
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      maxOutputTokens: 100,
-    },
-  });
-  const result = await chat.sendMessage(comment);
+  const prompt = `suppose you are Cevin.AI. You are an AI model which can generate paint and give feedback based on your generation. I am giving you a prompt - ${context} .  now you have to imagine a painting detail based on the context. now based on your imaginary detail about that painting , generate a funny and energetic positive reply for this comment - ${comment}. make the reply  simple and short `;
+  const result = await model.generateContent(prompt);
   const response = await result.response;
   const text = response.text();
   return text;
@@ -219,7 +161,10 @@ async function test() {
 
     app.get("/paintings", async (req, res) => {
       try {
-        const result = await imageCollection.find().toArray();
+        const result = await imageCollection
+          .find()
+          .sort({ _id: -1, likesCount: -1 })
+          .toArray();
         res.send(result);
       } catch (err) {
         console.log(err);
@@ -299,7 +244,7 @@ async function test() {
       try {
         const body = req.body;
         const time = new Date();
-        const reply = await getAiReply(body.context, body.comment);
+        const reply = await getSimpleReply(body.context, body.comment);
         const data = {
           ...body,
           time,
