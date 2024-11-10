@@ -49,6 +49,7 @@ const verifyToken = (req, res, next) => {
  *************************************************/
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API);
+const visionModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 const port = process.env.PORT || 5000;
 const API_KEY = process.env.APIKEY;
 const image_hosting_key = process.env.IMAGE_HOSTING_KEY;
@@ -69,12 +70,35 @@ const client = new MongoClient(process.env.URI, {
  utilites functions 
  ***********************************
 */
+async function fileToGenerativePart(buffer, mimeType) {
+  return {
+    inlineData: {
+      data: Buffer.from(buffer).toString("base64"),
+      mimeType,
+    },
+  };
+}
+
+async function getImageDetail(buffer) {
+  try {
+    const image = await fileToGenerativePart(buffer, "image/jpeg");
+    const prompt = "tell me in a detail about this picture?";
+    const result = await visionModel.generateContent([prompt, image]);
+    const googleResponse = await result.response;
+    const response = googleResponse.text();
+    // console.log(response);
+    return { response };
+  } catch (err) {
+    console.log(err);
+    ``;
+  }
+}
 
 //https://clipdrop.co/apis/docs/text-to-image
 async function getImageBuffer(prompt) {
   const formData = new FormData();
   formData.append("prompt", prompt);
-  console.log(formData, API_KEY);
+  console.log(formData);
 
   const response = await fetch("https://clipdrop-api.co/text-to-image/v1", {
     method: "POST",
@@ -123,10 +147,104 @@ async function postImageBB(buffer, prompt) {
 
 // Thats The simple version.  It can generate irreleveant data . model with history could narrow down the reply . watch contextualTextGeneraton.js file
 
-const getSimpleReply = async (context, comment) => {
+const getAiReply = async (context, comment) => {
   const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-  const prompt = `suppose you are Cevin.AI. You are an AI model which can generate paint and give feedback based on your generation. I am giving you a prompt - ${context} .  now you have to imagine a painting detail based on the context. now based on your imaginary detail about that painting , generate a funny and energetic positive reply for this comment - ${comment}. make the reply  simple and short `;
-  const result = await model.generateContent(prompt);
+  const chat = model.startChat({
+    history: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: "giving  you a detail about a painting. people will give you feedbacks for this painting / ask you something about the painting.you have to make a reply based on the detail  by acting that , you are cevin.AI . you draw that painting. and you will make feedback replies. user can say anything based on the comment . it could be  positive or negative . You must have to reply. try to make it funny and engaged. if you dont understand the feedback reply. reply that you did not get your comment. could please comment again ? ",
+          },
+        ],
+      },
+      {
+        role: "model",
+        parts: [{ text: "Great. What is the painting detail" }],
+      },
+      {
+        role: "user",
+        parts: [
+          {
+            text: context,
+          },
+        ],
+      },
+      {
+        role: "model",
+        parts: [
+          {
+            text: "Great. I will iamgine a painting and  reply based on this imaginated painting detail.",
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      maxOutputTokens: 100,
+    },
+  });
+  try {
+    const result = await chat.sendMessage(comment);
+    const response = await result.response;
+    const text = response.text();
+    return text;
+  } catch (err) {}
+};
+const getAiDetail = async (prompt) => {
+  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  const chat = model.startChat({
+    history: [
+      {
+        role: "user",
+        parts: [
+          {
+            text: "giving  you  a title about a painting. imagine a painting from this title then think about a possible simple detail.",
+          },
+        ],
+      },
+      {
+        role: "model",
+        parts: [{ text: "Great. What is the painting title" }],
+      },
+      {
+        role: "user",
+        parts: [
+          {
+            text: "A programmer coding in a dark room",
+          },
+        ],
+      },
+      {
+        role: "model",
+        parts: [
+          {
+            text: "A programmer coding in a dark room where a man sitting at a desk and working on his computer. He is wearing headphones and there is a tablet on the desk to his left. The background is dark and there is a colorful pattern on the screen of his computer. The painting is done in a realistic style and the colors are vibrant and saturated. The man is wearing a blue shirt and he has a beard. He is focused on his work and he does not seem to be aware of the viewer. The painting is set in a modern-day office and it depicts a common scene. The overall mood of the painting is one of peace and tranquility.",
+          },
+        ],
+      },
+      {
+        role: "user",
+        parts: [
+          {
+            text: "female teacher teaching her students under the tree",
+          },
+        ],
+      },
+      {
+        role: "model",
+        parts: [
+          {
+            text: "female teacher teaching her students under the tree where a group of people gathered under a tree. The central figure is a woman, dressed in a long white robe, who is reading from a book. The others are sitting in a circle around her, listening attentively. The setting is a lush green field, with trees in the background. The sun is shining brightly, and there is a sense of peace and tranquility. The painting is done in a realistic style, and the figures are depicted with great detail. The colors are vibrant and lifelike, and the overall effect is one of beauty and harmony.",
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      maxOutputTokens: 200,
+    },
+  });
+  const result = await chat.sendMessage(prompt);
   const response = await result.response;
   const text = response.text();
   return text;
@@ -135,6 +253,15 @@ const getSimpleReply = async (context, comment) => {
 async function test() {
   try {
     client.connect();
+
+    app.get("/detail", async (req, res) => {
+      const prompt = req.query.prompt;
+      if (!prompt) {
+        return res.send("No Valid Prompt Found");
+      }
+      const detail = await getAiDetail(prompt);
+      res.send(detail);
+    });
 
     app.post("/jwt", async (req, res) => {
       const user = req.body;
@@ -166,12 +293,27 @@ async function test() {
     /*************************************************
      *     Get API Endpoint Definition x 4
      *************************************************/
+    app.get("/run-script", async (req, res) => {
+      const data = await imageCollection.find({ detail: null }).toArray();
+
+      res.send({ file: data[0] });
+    });
 
     app.get("/paintings", async (req, res) => {
       try {
+        const result = await imageCollection.find().sort({ _id: -1 }).toArray();
+        res.send(result);
+      } catch (err) {
+        console.log(err);
+      }
+    });
+
+    app.get("/recent-paintings", async (req, res) => {
+      try {
         const result = await imageCollection
           .find()
-          .sort({ _id: -1, likesCount: -1 })
+          .sort({ _id: -1 })
+          .limit(6)
           .toArray();
         res.send(result);
       } catch (err) {
@@ -179,9 +321,22 @@ async function test() {
       }
     });
 
-    app.get("/paintings/:id", verifyToken, async (req, res) => {
+    app.get("/liked-paintings", async (req, res) => {
       try {
-        console.log(req?.params?.id);
+        const result = await imageCollection
+          .find()
+          .sort({ likesCount: -1 })
+          .limit(6)
+          .toArray();
+        res.send(result);
+      } catch (err) {
+        console.log(err);
+      }
+    });
+
+    app.get("/paintings/:id", async (req, res) => {
+      try {
+        console.log("id found for painting details = " + req?.params?.id);
         const result = await imageCollection.findOne({
           _id: new ObjectId(req?.params?.id),
         });
@@ -217,20 +372,31 @@ async function test() {
      *     POST API Endpoint Definition x 2
      *************************************************/
 
-    app.post("/generate-image", verifyToken, async (req, res) => {
+    app.post("/generate-image", async (req, res) => {
+      let newID;
       try {
-        // console.log(req);
         const body = req.body;
+
         const { prompt, email, activeType, activeCat } = body;
-        if (!prompt || !email || !activeCat || !activeCat) {
+        if (!prompt || !email || !activeCat || !activeType) {
           return res.status(500).send("error");
         }
 
+        const result = await imageCollection.insertOne({ status: true });
+        newID = result.insertedId;
+        res.send(result);
+
+        // const detail = await getAiDetail(prompt);
+
+        // let promptDetail = detail.replaceAll(".", "");
+        // promptDetail = detail.replaceAll(",", "");
         const promptFinal = `imagine : A ${activeCat}  ${activeType}  painting about ${prompt}`;
         const buffer = await getImageBuffer(promptFinal);
+        console.log("buffer achieved");
+        const detail = await getImageDetail(buffer);
+        console.log("detail acchieved. detail = " + detail);
         const data = await postImageBB(buffer, prompt);
 
-        console.log(data);
         if (data.success) {
           const newData = {
             ...data,
@@ -238,21 +404,36 @@ async function test() {
             likes: [],
             likesCount: 0,
             price: parseInt(Math.random() * 1500 + 500),
-            detail: prompt,
+            detail: detail?.response,
+            status: false,
           };
-          const result = await imageCollection.insertOne(newData);
-          res.send(result);
-        } else res.send(data);
+          console.log("new Data Created . Data = ", newData);
+          const updateStatus = await imageCollection.updateOne(
+            {
+              _id: new ObjectId(result.insertedId),
+            },
+            {
+              $set: { ...newData },
+            }
+          );
+          console.log("update status = ", updateStatus);
+        }
       } catch (error) {
+        await imageCollection.deleteOne({ _id: new ObjectId(newID) });
+        res.send({ status: false });
         console.error("Error:", error);
         res.status(500).send("Internal Server Error");
       }
     });
+
     app.post("/comment", verifyToken, async (req, res) => {
       try {
         const body = req.body;
         const time = new Date();
-        const reply = await getSimpleReply(body.context, body.comment);
+        const reply =
+          (await getAiReply(body.context, body.comment)) ||
+          "Cavin is may be busy right now. he will reply later";
+
         const data = {
           ...body,
           time,
@@ -293,7 +474,10 @@ async function test() {
         const newComment = req.body.newComment;
         const context = req.body.context;
         const newReply = await getAiReply(context, newComment);
+        if (!newReply) return res.send({ status: false });
+
         const query = { _id: new ObjectId(id) };
+
         const updatedData = {
           $set: {
             comment: newComment,
